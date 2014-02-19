@@ -30,6 +30,34 @@ class V2IdentityPlugin(utils.TestCase):
 
     TEST_PASS = 'password'
 
+    TEST_COMPUTE_ADMIN = "http://nova/novapi/admin"
+    TEST_COMPUTE_INTERNAL = "http://nova/novapi/internal"
+    TEST_COMPUTE_PUBLIC = "http://nova/novapi/public"
+
+    TEST_DISCOVERY = {
+        "version": {
+            "id": "v2.0",
+            "links": [
+                {
+                    "href": TEST_URL,
+                    "rel": "self"
+                },
+            ],
+            "media-types": [
+                {
+                    "base": "application/json",
+                    "type": "application/vnd.openstack.identity-v2.0+json"
+                },
+                {
+                    "base": "application/xml",
+                    "type": "application/vnd.openstack.identity-v2.0+xml"
+                }
+            ],
+            "status": "stable",
+            "updated": "2014-04-17T00:00:00Z"
+        }
+    }
+
     TEST_SERVICE_CATALOG = [{
         "endpoints": [{
             "adminURL": "http://cdn.admin-nets.local:8774/v1.0",
@@ -41,10 +69,10 @@ class V2IdentityPlugin(utils.TestCase):
         "name": "nova_compat"
     }, {
         "endpoints": [{
-            "adminURL": "http://nova/novapi/admin",
+            "adminURL": TEST_COMPUTE_ADMIN,
             "region": "RegionOne",
-            "internalURL": "http://nova/novapi/internal",
-            "publicURL": "http://nova/novapi/public"
+            "internalURL": TEST_COMPUTE_INTERNAL,
+            "publicURL": TEST_COMPUTE_PUBLIC
         }],
         "type": "compute",
         "name": "nova"
@@ -233,3 +261,39 @@ class V2IdentityPlugin(utils.TestCase):
 
         self.assertRaises(exceptions.InvalidResponse, s.get, 'http://any',
                           authenticated=True)
+
+    @httpretty.activate
+    def test_discovering(self):
+        # service catalog points to TEST_COMPUTE_ADMIN
+        self.stub_auth(json=self.TEST_RESPONSE_DICT)
+
+        # which returns discovery information pointing to TEST_URL
+        self.stub_url(httpretty.GET, [],
+                      base_url=self.TEST_COMPUTE_ADMIN,
+                      json=self.TEST_DISCOVERY)
+
+        # which gives our sample values
+        self.stub_url(httpretty.GET, ['path'],
+                      body='SUCCESS', status=200)
+
+        a = v2.Password(self.TEST_URL, username=self.TEST_USER,
+                        password=self.TEST_PASS)
+        s = session.Session(auth=a)
+
+        resp = s.get('/path', endpoint_filter={'service_type': 'compute',
+                                               'interface': 'admin',
+                                               'version': 'v2'})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.text, 'SUCCESS')
+
+        # if we don't specify a version, we use the URL from the SC
+        self.stub_url(httpretty.GET, ['path'],
+                      base_url=self.TEST_COMPUTE_ADMIN,
+                      body='SC SUCCESS', status=200)
+
+        resp = s.get('/path', endpoint_filter={'service_type': 'compute',
+                                               'interface': 'admin'})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.text, 'SC SUCCESS')

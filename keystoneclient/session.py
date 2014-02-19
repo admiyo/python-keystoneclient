@@ -111,6 +111,9 @@ class Session(object):
         if user_agent is not None:
             self.user_agent = user_agent
 
+        # discovered endpoint cache for auth plugins
+        self._endpoint_cache = {}
+
     @utils.positional(enforcement=utils.positional.WARN)
     def request(self, url, method, json=None, original_ip=None,
                 user_agent=None, redirect=None, authenticated=None,
