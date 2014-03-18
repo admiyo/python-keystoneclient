@@ -14,6 +14,7 @@ import httpretty
 import six
 from testtools import matchers
 
+from keystoneclient import _discover
 from keystoneclient import client
 from keystoneclient import discover
 from keystoneclient import exceptions
@@ -464,12 +465,7 @@ class ClientDiscoveryTests(utils.TestCase):
         self.assertDiscoveryFailure(auth_url=BASE_URL)
 
     def test_discovery_ignore_invalid(self):
-        resp = [{'id': '3.99',  # without a leading v
-                 'links': [{'href': V3_URL, 'rel': 'self'}],
-                 'media-types': V3_MEDIA_TYPES,
-                 'status': 'stable',
-                 'updated': UPDATED},
-                {'id': 'v3.0',
+        resp = [{'id': 'v3.0',
                  'links': [1, 2, 3, 4],  # invalid links
                  'media-types': V3_MEDIA_TYPES,
                  'status': 'stable',
@@ -547,15 +543,121 @@ class ClientDiscoveryTests(utils.TestCase):
         self.assertEqual(client.password, 'bar')
 
 
+@httpretty.activate
+class DiscoverQueryTests(utils.TestCase):
+
+    def test_available_keystone_data(self):
+        httpretty.register_uri(httpretty.GET, BASE_URL, status=300,
+                               body=V3_VERSION_LIST)
+
+        disc = discover.Discover(auth_url=BASE_URL)
+        versions = disc.version_data()
+
+        self.assertEqual(versions[0]['version'], (2, 0))
+        self.assertEqual(versions[0]['raw_status'], 'stable')
+        self.assertEqual(versions[0]['url'], V2_URL)
+        self.assertEqual(versions[1]['version'], (3, 0))
+        self.assertEqual(versions[1]['raw_status'], 'stable')
+        self.assertEqual(versions[1]['url'], V3_URL)
+
+        version = disc.data_for('v3.0')
+        self.assertEqual(version['version'], (3, 0))
+        self.assertEqual(version['raw_status'], 'stable')
+        self.assertEqual(version['url'], V3_URL)
+
+        version = disc.data_for(2)
+        self.assertEqual(version['version'], (2, 0))
+        self.assertEqual(version['raw_status'], 'stable')
+        self.assertEqual(version['url'], V2_URL)
+
+        self.assertIsNone(disc.url_for('v4'))
+        self.assertEqual(V3_URL, disc.url_for('v3'))
+        self.assertEqual(V2_URL, disc.url_for('v2'))
+
+    def test_available_cinder_data(self):
+        body = jsonutils.dumps(CINDER_EXAMPLES)
+        httpretty.register_uri(httpretty.GET, BASE_URL, status=300, body=body)
+
+        v1_url = "%sv1/" % BASE_URL
+        v2_url = "%sv2/" % BASE_URL
+
+        disc = discover.Discover(auth_url=BASE_URL)
+        versions = disc.version_data()
+
+        self.assertEqual(versions[0]['version'], (1, 0))
+        self.assertEqual(versions[0]['raw_status'], 'CURRENT')
+        self.assertEqual(versions[0]['url'], v1_url)
+        self.assertEqual(versions[1]['version'], (2, 0))
+        self.assertEqual(versions[1]['raw_status'], 'CURRENT')
+        self.assertEqual(versions[1]['url'], v2_url)
+
+        version = disc.data_for('v2.0')
+        self.assertEqual(version['version'], (2, 0))
+        self.assertEqual(version['raw_status'], 'CURRENT')
+        self.assertEqual(version['url'], v2_url)
+
+        version = disc.data_for(1)
+        self.assertEqual(version['version'], (1, 0))
+        self.assertEqual(version['raw_status'], 'CURRENT')
+        self.assertEqual(version['url'], v1_url)
+
+        self.assertIsNone(disc.url_for('v3'))
+        self.assertEqual(v2_url, disc.url_for('v2'))
+        self.assertEqual(v1_url, disc.url_for('v1'))
+
+    def test_available_glance_data(self):
+        body = jsonutils.dumps(GLANCE_EXAMPLES)
+        httpretty.register_uri(httpretty.GET, BASE_URL, status=200, body=body)
+
+        v1_url = "%sv1/" % BASE_URL
+        v2_url = "%sv2/" % BASE_URL
+
+        disc = discover.Discover(auth_url=BASE_URL)
+        versions = disc.version_data()
+
+        self.assertEqual(versions[0]['version'], (1, 0))
+        self.assertEqual(versions[0]['raw_status'], 'SUPPORTED')
+        self.assertEqual(versions[0]['url'], v1_url)
+        self.assertEqual(versions[1]['version'], (1, 1))
+        self.assertEqual(versions[1]['raw_status'], 'CURRENT')
+        self.assertEqual(versions[1]['url'], v1_url)
+        self.assertEqual(versions[2]['version'], (2, 0))
+        self.assertEqual(versions[2]['raw_status'], 'SUPPORTED')
+        self.assertEqual(versions[2]['url'], v2_url)
+        self.assertEqual(versions[3]['version'], (2, 1))
+        self.assertEqual(versions[3]['raw_status'], 'SUPPORTED')
+        self.assertEqual(versions[3]['url'], v2_url)
+        self.assertEqual(versions[4]['version'], (2, 2))
+        self.assertEqual(versions[4]['raw_status'], 'CURRENT')
+        self.assertEqual(versions[4]['url'], v2_url)
+
+        for ver in (2, 2.1, 2.2):
+            version = disc.data_for(ver)
+            self.assertEqual(version['version'], (2, 2))
+            self.assertEqual(version['raw_status'], 'CURRENT')
+            self.assertEqual(version['url'], v2_url)
+            self.assertEqual(disc.url_for(ver), v2_url)
+
+        for ver in (1, 1.1):
+            version = disc.data_for(ver)
+            self.assertEqual(version['version'], (1, 1))
+            self.assertEqual(version['raw_status'], 'CURRENT')
+            self.assertEqual(version['url'], v1_url)
+            self.assertEqual(disc.url_for(ver), v1_url)
+
+        self.assertIsNone(disc.url_for('v3'))
+        self.assertIsNone(disc.url_for('v2.3'))
+
+
 class DiscoverUtils(utils.TestCase):
 
     def test_version_number(self):
         def assertVersion(inp, out):
-            self.assertEqual(discover._normalize_version_number(inp), out)
+            self.assertEqual(_discover.normalize_version_number(inp), out)
 
         def versionRaises(inp):
             self.assertRaises(TypeError,
-                              discover._normalize_version_number,
+                              _discover.normalize_version_number,
                               inp)
 
         assertVersion('v1.2', (1, 2))
@@ -571,23 +673,3 @@ class DiscoverUtils(utils.TestCase):
         versionRaises('hello')
         versionRaises('1.a')
         versionRaises('vaccuum')
-
-    def test_keystone_version_objects(self):
-        v31s = discover._KeystoneVersion((3, 1), 'stable')
-        v20s = discover._KeystoneVersion((2, 0), 'stable')
-        v30s = discover._KeystoneVersion((3, 0), 'stable')
-
-        v31a = discover._KeystoneVersion((3, 1), 'alpha')
-        v31b = discover._KeystoneVersion((3, 1), 'beta')
-
-        self.assertTrue(v31s > v30s)
-        self.assertTrue(v30s > v20s)
-
-        self.assertTrue(v31s > v31a)
-        self.assertFalse(v31s < v31a)
-        self.assertTrue(v31b > v31a)
-        self.assertTrue(v31a < v31b)
-        self.assertTrue(v31b > v30s)
-
-        self.assertNotEqual(v31s, v31b)
-        self.assertEqual(v31s, discover._KeystoneVersion((3, 1), 'stable'))
