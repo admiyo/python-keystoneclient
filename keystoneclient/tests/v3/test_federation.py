@@ -10,13 +10,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import copy
 import uuid
 
 import httpretty
 
+from keystoneclient import exceptions
 from keystoneclient.tests.v3 import utils
 from keystoneclient.v3.contrib.federation import identity_providers
 from keystoneclient.v3.contrib.federation import mappings
+from keystoneclient.v3.contrib.federation import protocols
 
 
 class IdentityProviderTests(utils.TestCase, utils.CrudTests):
@@ -125,3 +128,172 @@ class MappingTests(utils.TestCase, utils.CrudTests):
                 req_ref[attr],
                 'Expected different %s' % attr)
         self.assertEntityRequestBodyIs(manager_ref)
+
+
+class ProtocolTests(utils.TestCase, utils.CrudTests):
+    def setUp(self):
+        super(ProtocolTests, self).setUp()
+        self.key = 'protocol'
+        self.collection_key = 'protocols'
+        self.model = protocols.Protocol
+        self.manager = self.client.federation.protocols
+        self.path_prefix = 'OS-FEDERATION/identity_providers'
+
+    def _compare_attributes(self, returned, response):
+        for attr in response:
+            self.assertEqual(
+                getattr(returned, attr),
+                response[attr],
+                'Expected different %s' % attr)
+
+    def _transform_to_response(self, ref):
+        """Rebuild dictionary so it can be used as a
+        reference response body.
+
+        """
+        response = copy.deepcopy(ref)
+        response['id'] = response.pop('protocol_id')
+        del response['identity_provider_id']
+        return response
+
+    def new_ref(self, **kwargs):
+        kwargs.setdefault('mapping_id', uuid.uuid4().hex)
+        kwargs.setdefault('identity_provider_id', uuid.uuid4().hex)
+        kwargs.setdefault('protocol_id', uuid.uuid4().hex)
+        return kwargs
+
+    def build_parts(self, identity_provider, protocol_id=None):
+        """Build array used to construct httpretty URL/
+
+        Construct and return array with URL parts later used
+        by methods like utils.TestCase.stub_entity().
+        Example of URL:
+        ``OS-FEDERATION/identity_providers/{idp_id}/
+        protocols/({protocol_id})?
+
+        """
+        parts = ['OS-FEDERATION', 'identity_providers',
+                 identity_provider, 'protocols']
+        if protocol_id:
+            parts.append(protocol_id)
+        return parts
+
+    @httpretty.activate
+    def test_create(self):
+        """Test creating federation protocol tied to an Identity Provider.
+
+        URL to be tested: PUT /OS-FEDERATION/identity_providers/
+        $identity_provider/protocols/$protocol
+
+        """
+        request_args = self.new_ref()
+        response = self._transform_to_response(request_args)
+        parts = self.build_parts(request_args['identity_provider_id'],
+                                 request_args['protocol_id'])
+        self.stub_entity(httpretty.PUT, entity=response,
+                         parts=parts, status=201)
+        returned = self.manager.create(**request_args)
+        self._compare_attributes(returned, response)
+        request_body = {'mapping_id': request_args['mapping_id']}
+        self.assertEntityRequestBodyIs(request_body)
+
+    @httpretty.activate
+    def test_get(self):
+        """Fetch federation protocol object.
+
+        URL to be tested: GET /OS-FEDERATION/identity_providers/
+        $identity_provider/protocols/$protocol
+
+        """
+        request_args = self.new_ref()
+        response = self._transform_to_response(request_args)
+
+        parts = self.build_parts(request_args['identity_provider_id'],
+                                 request_args['protocol_id'])
+        self.stub_entity(httpretty.GET, entity=response,
+                         parts=parts, status=201)
+
+        returned = self.manager.get(request_args['identity_provider_id'],
+                                    request_args['protocol_id'])
+        self.assertIsInstance(returned, self.model)
+        self._compare_attributes(returned, response)
+
+    @httpretty.activate
+    def test_delete(self):
+        """Delete federation protocol object.
+
+        URL to be tested: DELETE /OS-FEDERATION/identity_providers/
+        $identity_provider/protocols/$protocol
+
+        """
+        request_args = self.new_ref()
+        parts = self.build_parts(request_args['identity_provider_id'],
+                                 request_args['protocol_id'])
+
+        self.stub_entity(httpretty.DELETE, parts=parts, status=204)
+
+        self.manager.delete(request_args['identity_provider_id'],
+                            request_args['protocol_id'])
+
+    @httpretty.activate
+    def test_list(self):
+        """Test listing all federation protocols tied to the Identity Provider.
+
+        URL to be tested: GET /OS-FEDERATION/identity_providers/
+        $identity_provider/protocols
+
+        """
+        def _ref_protocols():
+            return {
+                'id': uuid.uuid4().hex,
+                'mapping_id': uuid.uuid4().hex
+            }
+
+        request_args = self.new_ref()
+        response = [_ref_protocols() for _ in range(3)]
+        parts = self.build_parts(request_args['identity_provider_id'])
+        self.stub_entity(httpretty.GET, parts=parts,
+                         entity=response, status=200)
+
+        returned = self.manager.list(request_args['identity_provider_id'])
+        for obj, ref_obj in zip(returned, response):
+            self._compare_attributes(obj, ref_obj)
+
+    @httpretty.activate
+    def test_list_params(self):
+        request_args = self.new_ref()
+        filter_kwargs = {uuid.uuid4().hex: uuid.uuid4().hex}
+        parts = self.build_parts(request_args['identity_provider_id'])
+
+        # Return HTTP 401 as we don't accept such requests.
+        self.stub_entity(httpretty.GET, parts=parts, status=401)
+        self.assertRaises(exceptions.Unauthorized,
+                          self.manager.list,
+                          request_args['identity_provider_id'],
+                          **filter_kwargs)
+        self.assertQueryStringContains(**filter_kwargs)
+
+    @httpretty.activate
+    def test_update(self):
+        """Test updating federation protocol
+
+        URL to be tested: PATCH /OS-FEDERATION/identity_providers/
+        $identity_provider/protocols/$protocol
+
+        """
+        request_args = self.new_ref()
+        response = self._transform_to_response(request_args)
+
+        parts = self.build_parts(request_args['identity_provider_id'],
+                                 request_args['protocol_id'])
+
+        self.stub_entity(httpretty.PATCH, parts=parts,
+                         entity=response, status=200)
+
+        returned = self.manager.update(request_args['identity_provider_id'],
+                                       request_args['protocol_id'],
+                                       mapping_id=request_args['mapping_id'])
+        self.assertIsInstance(returned, self.model)
+        self._compare_attributes(returned, response)
+        request_body = {'mapping_id': request_args['mapping_id']}
+        self.assertEntityRequestBodyIs(request_body)
