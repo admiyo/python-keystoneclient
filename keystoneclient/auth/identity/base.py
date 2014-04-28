@@ -137,6 +137,12 @@ class BaseIdentityPlugin(base.BaseAuthPlugin):
             # defaulting to the most recent version.
             return sc_url
 
+        # NOTE(jamielennox): this is the auth plugin equivalent to the v2.0
+        # in the catalog hack. For backwards compatibility people might have
+        # a /v2.0 endpoint in there catalog even though they want to use v3
+        # clients.
+        sc_url = sc_url.rstrip('v2.0')
+
         disc = None
 
         # NOTE(jamielennox): There is a cache located on both the session
