@@ -13,18 +13,71 @@
 import os
 
 from keystoneclient import client
+from keystoneclient import exceptions
 from keystoneclient import session
 from keystoneclient.auth.identity import v3
 
 
 def display(keystone_client, stage):
     print(stage)
-    global provider, protocol
+
+    for mapping in keystone_client.federation.mappings.list():
+        print(mapping)
     for provider in keystone_client.federation.identity_providers.list():
         print("provider = %s" % provider.id)
         for protocol in keystone_client.federation.protocols.list(provider):
             print("  protocol = %s" % protocol.id)
     print()
+
+
+def create_entries(keystone_client):
+    rules = [
+        {
+            "local": [
+                {
+                    "user": {
+                        "name": "{0}",
+                        "id": "{0}",
+                    }
+                },
+                {
+                    "group": {
+                        "id": "osprey"
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "REMOTE_USER"
+                }
+            ]
+        }
+    ]
+
+    keystone_client.federation.mappings.create(mapping_id='cloudlab',
+                                               rules=rules)
+    keystone_client.federation.identity_providers.create(id='sssd')
+    keystone_client.federation.protocols.create(identity_provider_id='sssd',
+                                                protocol_id='kerberos',
+                                                mapping_id='cloudlab')
+    display(keystone_client, 'Created Protocol')
+
+
+def delete_entries(keystone_client):
+    try:
+        keystone_client.federation.mappings.delete(mapping='cloudlab')
+    except exceptions.NotFound:
+        pass
+    try:
+        keystone_client.federation.protocols.delete(identity_provider='sssd',
+                                                    protocol='kerberos')
+    except exceptions.NotFound:
+        pass
+    try:
+        keystone_client.federation.identity_providers.delete(
+            identity_provider='sssd')
+    except exceptions.NotFound:
+        pass
 
 
 def main():
@@ -53,17 +106,12 @@ def main():
                                     endpoint=os_auth_url,
                                     )
     display(keystone_client, 'Start')
-    keystone_client.federation.identity_providers.create(id='sssd')
-    display(keystone_client, 'Created IdP')
-    keystone_client.federation.protocols.create(identity_provider_id='sssd',
-                                                protocol_id='kerberos')
-    display(keystone_client, 'Created Protocol')
+    for group in keystone_client.groups.list():
+        print("group id = %s" % group.id)
 
-    keystone_client.federation.protocols.delete(identity_provider='sssd',
-                                                protocol='kerberos')
-    display(keystone_client, 'Deleted Protocol')
-    keystone_client.federation.identity_providers.delete(identity_provider='sssd')
-    display(keystone_client, 'Deleted Idp')
+
+    delete_entries(keystone_client)
+    create_entries(keystone_client)
 
 if __name__ == "__main__":
     main()
