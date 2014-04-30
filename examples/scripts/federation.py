@@ -44,6 +44,11 @@ def create_entries(keystone_client):
                     "group": {
                         "id": "osprey"
                     }
+                },
+                {
+                    "domain": {
+                        "id": "default"
+                    }
                 }
             ],
             "remote": [
@@ -80,6 +85,13 @@ def delete_entries(keystone_client):
         pass
 
 
+def assign_role_to_group(keystone_client):
+    group = keystone_client.groups.get('osprey')
+    role = keystone_client.roles.find(name='Member')
+    project = keystone_client.procts.find(name='Member')
+    keystone_client.roles.grant(role=role, group=group, project=project)
+
+
 def main():
     try:
         os_password = os.environ['OS_PASSWORD']
@@ -106,9 +118,10 @@ def main():
                                     endpoint=os_auth_url,
                                     )
     display(keystone_client, 'Start')
-    for group in keystone_client.groups.list():
-        print("group id = %s" % group.id)
+    #for group in keystone_client.groups.list():
+    #    print("group id = %s" % group.id)
 
+    #assign_role_to_group(keystone_client)
 
     delete_entries(keystone_client)
     create_entries(keystone_client)
