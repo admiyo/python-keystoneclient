@@ -22,7 +22,7 @@ def display(keystone_client, stage):
     print(stage)
 
     for mapping in keystone_client.federation.mappings.list():
-        print(mapping)
+        print(mapping.rules)
     for provider in keystone_client.federation.identity_providers.list():
         print("provider = %s" % provider.id)
         for protocol in keystone_client.federation.protocols.list(provider):
@@ -39,16 +39,6 @@ def create_entries(keystone_client):
                         "name": "{0}",
                         "id": "{0}",
                     }
-                },
-                {
-                    "group": {
-                        "id": "osprey"
-                    }
-                },
-                {
-                    "domain": {
-                        "id": "default"
-                    }
                 }
             ],
             "remote": [
@@ -56,7 +46,52 @@ def create_entries(keystone_client):
                     "type": "REMOTE_USER"
                 }
             ]
-        }
+        },
+        {
+            "local": [
+                {
+                    "group": {
+                        "id": "narnians"
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "REMOTE_USER_GROUPS",
+                    "any_one_of": ["narnians"]
+                }
+            ]
+        },
+        {
+            "local": [
+                {
+                    "group": {
+                        "id": "telmarines"
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "REMOTE_USER_GROUPS",
+                    "any_one_of": ["telmarines"]
+                }
+            ]
+        },
+        {
+            "local": [
+                {
+                    "group": {
+                        "id": "osprey"
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "REMOTE_USER_GROUPS",
+                    "any_one_of": ["osprey"]
+                }
+            ]
+        },
     ]
 
     keystone_client.federation.mappings.create(mapping_id='cloudlab',
@@ -85,10 +120,11 @@ def delete_entries(keystone_client):
         pass
 
 
-def assign_role_to_group(keystone_client):
-    group = keystone_client.groups.get('osprey')
-    role = keystone_client.roles.find(name='Member')
-    project = keystone_client.procts.find(name='Member')
+def assign_role_to_group(keystone_client, group_name='osprey', role_name='Member',
+                         project_name='demo'):
+    group = keystone_client.groups.get(group_name)
+    role = keystone_client.roles.find(name=role_name)
+    project = keystone_client.projects.find(name=project_name)
     keystone_client.roles.grant(role=role, group=group, project=project)
 
 
@@ -118,8 +154,27 @@ def main():
                                     endpoint=os_auth_url,
                                     )
     display(keystone_client, 'Start')
-    #for group in keystone_client.groups.list():
-    #    print("group id = %s" % group.id)
+    for group in keystone_client.groups.list():
+        print("group id = %s" % group.id)
+        if group.id == 'narnians':
+            group_narnians = group
+
+
+
+    #keystone_client.projects.create(name='Castle', domain='default')
+    #assign_role_to_group(keystone_client, group_name='telmarines', role_name='Member',
+    #                     project_name='Castle')
+
+    #keystone_client.projects.create(name='Woods', domain='default')
+    #assign_role_to_group(keystone_client, group_name='narnians', role_name='Member',
+    #                     project_name='Woods')
+
+    project_woods  = keystone_client.projects.find(name="Woods")
+
+    for role in keystone_client.roles.list(group=group_narnians,
+                                           project=project_woods):
+        print("members of group id= %s have  role %s in project %s" %
+              (group_narnians.id, role.name, project_woods.name))
 
     #assign_role_to_group(keystone_client)
 
